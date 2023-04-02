@@ -4,6 +4,7 @@ import json
 from operator import itemgetter
 
 import numpy as np
+from dateutil.parser import parse
 from scipy.stats import gmean, gstd
 
 import logging
@@ -154,7 +155,10 @@ class TidepoolUser(object):
         for event in self.data_json:
 
             time_str = event["time"]
-            time = dt.datetime.strptime(time_str, API_DATA_TIMESTAMP_FORMAT)
+            try:
+                time = parse(time_str)
+            except ValueError:
+                time = dt.datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%SZ')
 
             if event["type"] == "smbg":
 
@@ -322,41 +326,46 @@ class TidepoolUser(object):
 
         circadian_hour = 0
         if use_circadian:
-            circadian_hour = self.detect_circadian_hr()
+            circadian_hour = self.detect_circadian_hr(start_date, end_date)
+            start_datetime_withoffset = dt.datetime(year=start_date.year, month=start_date.month, day=start_date.day,
+                                                    hour=circadian_hour)
+        else:
+            start_datetime_withoffset = start_date
 
         num_days = int((end_date - start_date).total_seconds() / 3600 / 24)
 
         dates = []
 
-        start_datetime_withoffset = dt.datetime(year=start_date.year, month=start_date.month, day=start_date.day,
-                                                hour=circadian_hour)
 
         daily_stats = []
         for i in range(num_days):
-            daily_start_datetime = start_datetime_withoffset + dt.timedelta(days=i)
-            daily_end_datetime = daily_start_datetime + dt.timedelta(days=1)
+            try:
+                daily_start_datetime = start_datetime_withoffset + dt.timedelta(days=i)
+                daily_end_datetime = daily_start_datetime + dt.timedelta(days=1)
 
-            dates.append(daily_start_datetime.date())
+                dates.append(daily_start_datetime.date())
 
-            total_bolus, num_bolus_events, total_basal, num_basal_events = self.get_total_insulin(daily_start_datetime,
-                                                                                                  daily_end_datetime)
-            total_insulin = total_bolus + total_basal
-            total_carbs, num_carb_events = self.get_total_carbs(daily_start_datetime, daily_end_datetime)
-            cgm_geo_mean, cgm_geo_std = self.get_cgm_stats(daily_start_datetime, daily_end_datetime)
-            residual_cgm = cgm_geo_mean - target_bg
+                total_bolus, num_bolus_events, total_basal, num_basal_events = self.get_total_insulin(daily_start_datetime,
+                                                                                                      daily_end_datetime)
+                total_insulin = total_bolus + total_basal
+                total_carbs, num_carb_events = self.get_total_carbs(daily_start_datetime, daily_end_datetime)
+                cgm_geo_mean, cgm_geo_std = self.get_cgm_stats(daily_start_datetime, daily_end_datetime)
+                residual_cgm = cgm_geo_mean - target_bg
 
-            day_stats = {
-                "date": daily_start_datetime,
-                "total_insulin": total_insulin,
-                "total_basal": total_basal,
-                "total_bolus": total_bolus,
-                "total_carbs": total_carbs,
-                "cgm_geo_mean": cgm_geo_mean,
-                "cgm_geo_std": cgm_geo_std,
-                "carb_insulin_ratio": total_carbs / (total_insulin * 0.5),
-                "residual_cgm": residual_cgm
-            }
+                day_stats = {
+                    "date": daily_start_datetime,
+                    "total_insulin": total_insulin,
+                    "total_basal": total_basal,
+                    "total_bolus": total_bolus,
+                    "total_carbs": total_carbs,
+                    "cgm_geo_mean": cgm_geo_mean,
+                    "cgm_geo_std": cgm_geo_std,
+                    "carb_insulin_ratio": total_carbs / (total_insulin * 0.5),
+                    "residual_cgm": residual_cgm
+                }
 
-            daily_stats.append(day_stats)
+                daily_stats.append(day_stats)
+            except Exception as ex:
+                print(str(ex))
 
         return daily_stats
